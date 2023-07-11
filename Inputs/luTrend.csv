@@ -1,0 +1,12 @@
+iTrendID,Trend,TrendII,TrendDefn,inUse,Score,TrendText,Red,Green,Blue,Alpha,Notes
+1,Virtually certain increase,Virtually certain increase,Over a scale relevant to tracking change in the indicator it is virtually certainly improving in status,1,4,Virtually certain increase,,,,,
+2,Extremely likely increase,Extremely likely increase,Over a scale relevant to tracking change in the indicator it is extremely likely improving in status,1,3,Extremely likely increase,,,,,
+3,Very likely increase,Very likely increase,Over a scale relevant to tracking change in the indicator it is very likely improving in status,1,2,Very likely increase,,,,,
+4,Likely increase,Likely,Over a scale relevant to tracking change in the indicator it is likely improving in status,1,1,Likely,,,,,
+5,About as likely as not increase,About as likely as not,Over a scale relevant to tracking change in the indicator it is about as likely as not improving in status,1,0,About as likely as not,,,,,
+6,Likely decrease,Likely decrease,Over a scale relevant to tracking change in the indicator it is likely deteriorating in status,1,-1,Likely decrease,,,,,
+7,Very likely decrease,Very likely decrease,Over a scale relevant to tracking change in the indicator it is very likely deteriorating in status,1,-2,Very likely decrease,,,,,
+8,Extremely likely decrease,Extremely likely decrease,Over a scale relevant to tracking change in the indicator it is extremely likely deteriorating in status,1,-3,Extremely likely decrease,,,,,
+9,Virtually certain decrease,Virtually certain decrease,Over a scale relevant to tracking change in the indicator it is virtually certainly deteriorating in status,1,-4,Virtually certain decrease,,,,,
+10,Unknown,Unknown,"Data are not available, or are not available at relevant temporal scales, to determine any trend in the status of this resource",1,0,was unknown,,,,,
+11,Not applicable,Not applicable,This indicator of the natural resource does not lend itself to being classified into one of the above trend classes,1,0,not applicable,,,,,
