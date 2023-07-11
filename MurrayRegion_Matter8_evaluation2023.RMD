@@ -1,0 +1,246 @@
+---
+title: "Murray Region Matter 8 Assessment"
+author: "Douglas Green"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+## Murray region Matter 8 environmental outcomes evaluation
+
+This assessment seeks to address the evaluation of environmental outcomes for the South Australian Murray Region Water Resource Planning Area for the period up to 2023.  
+
+### Introduction
+
+The SA Murray Region water resource plan area (WRPA) covers an area of approximately 63 509 km2. It incorporates all surface water and groundwater resources in this area excluding the surface water of the South Australian River Murray and Lower Lakes (Lakes Albert and Alexandrina). The SA Murray Region WRPA covers most of the Murray-Darling Basin in South Australia from the state border in the east, to the edge of the plains of the Mount Lofty Ranges in the west and south-east to the coast. In the Basin Plan, the SA Murray Region also includes the Coorong and Murray Mouth, however, for the purposes of Basin Plan reporting, the Coorong and Murray Mouth are reported along with the Lower Lakes as part of the Coorong, Lower Lakes and Murray Mouth priority environmental asset.
+
+### Priority Environmental Assets
+
+There is one PEA identified for the Murray Region, Watercourses in the Northern Mount Lofty Ranges. These watercourses are represented by the **Burra Creek Catchment**, specifically the permanent pools of the gorge section of the catchment.
+
+### Expected outcomes
+
+The ecological target in the Murray Region LTWP is ‘aquatic flora and fauna supported within permanent pools’. The ecological targets were adopted from the LTWP (DEWNR 2017a) and EWRs adopted from previous assessments (Deane et al. 2008) are:
+
+1. Maintenance of the existing baseflow to permanent pools
+2. Maintenance of occasional overbank and higher flows to scour and maintain pool depths, and assist in maintaining salinity levels. 
+
+Given the simplicity of targets and focus on hydrological metrics, no expected outcomes have been developed for the Murray Region. 
+
+### Indicators
+
+There are three indicators used for the assessment. All of the assessments relate to Burra Creek as the representative watercourse of the Northern Mt. Lofty Ranges with suitable data.
+
+Indicator | Measure 
+------------- | -------------
+Development levels | Level of water resource development
+Baseflow to permanent pools | Daily flows
+Higher flows and overbank flows | Daily flows
+
+#### Development levels
+
+The assessment of resource development is undertaken based on data established in 2007 and updated based on water affecting activity permits issues within Burra Creek Catchment. This information is provided by the Northen and Yorke Landscape board and the assessment is undertaken outside of this document. 
+
+#### Daily flows
+
+Daily flows are assessed based on monitoring data from two co-located flow monitoring stations. 
+
+1. A4261148: Burra Creek at Worlds End (low flows). This gauge started recording in Feb 2008 and is still operational.
+2. A4260536: Bura Creek at Worlds End. This gauge started recording in Dec 1973 and ceased recording in July 2009.
+
+Data from these two gauges is sourced from `water.data.sa.gov.au`.
+
+Flow data is assessed to ensure that the quality of the data is suitable for used. For this process, only verified data classed as fair or better is used. No unverified or infilled data is used. Data is coded in Water.Data with codes relating to the different quality associated with the data. Any data with a code above zero represents actual data. Data above 10 represents verified data usable for assessment. 
+
+to ensure accurate representation of proportions of each year/numbers of days per year for each of the metrics, the data is assessed to ensure that only years with 95% or greater are used for the assessment.
+
+**Dummy assessment uses data above 0, needs to be updated once final verified data comes in.**
+
+```{r Environment_establsihment}
+
+#Load Libraries needed
+
+library(mgcv)
+library(lattice)
+library(xts)
+library(ggplot2)
+library(MASS)
+library(tidyverse)
+library(fs)
+library(lubridate)
+library("rstan")
+library("rstanarm")
+library("doParallel")
+library(scales)
+library(ggpubr)
+
+
+#Trend assessment based on classes from IPCC ratings for trends
+# look up table for trend assessment
+luTrend <- read_csv("C:/Ranalysis/MR_M8_Reporting/Inputs/luTrend.csv")
+
+# A function to get the trend from p and slope
+# function requires the proportion of negative slopes from the Bayesian modelling. 
+trend_set <- function(x) {
+  
+  if(x >= 0.99) luTrend$Trend[9] else            # Virtually certain decrease
+    if(between(x, 0.95,0.9899)) luTrend$Trend[8] else      # Extremely likely decrease
+      if(between(x,0.9,0.9499)) luTrend$Trend[7] else       #Very likely decrease
+        if(between(x,0.66,0.8999)) luTrend$Trend[6] else    #Likely decrease
+          if(between(x,0.33,0.6599)) luTrend$Trend[5] else    #About as likely as not increase
+            if(between(x,0.10,0.3299)) luTrend$Trend[4] else   #Likely increase
+              if(between(x,0.05,0.0999)) luTrend$Trend[3] else  #Very likely increase
+                if(between(x,0.0101,0.0499)) luTrend$Trend[2] else  #Extremely likely increase
+                  if(x<=0.01) luTrend$Trend[1] else                 #Virtually certain increase
+                    if(is.na(x)) luTrend$Trend[10] else   # not applicable
+                      luTrend$Trend[11]                        # unknown
+  
+}
+
+```
+
+```{r Read_in_data}
+
+dat <- dir_info("C:/Ranalysis/MR_M8_Reporting/Inputs") %>%       #sets the working directory
+  dplyr::filter(grepl("streamflow",path)) %>%                 #finds files with flow in the file name
+  dplyr::select(path) %>%                               #selects files with flow in file name
+  dplyr::mutate(fileName = fs::path_file(path)
+                , Site = map_chr(fileName,~substr(.,1,regexpr("_",.)-1))
+                , data = map(path,read_csv)) %>% # reads in the data files (with "flow" in the name)
+  tidyr::unnest(data) %>% #splits the data up into individual bits
+  dplyr::mutate(Date = dmy(Date)
+                , Month = month(Date)
+                , year = year(Date)
+                , flowYear = if_else(Month<12,year,year+1)) %>% #creates additional parameters based on the data to aid script
+  dplyr::group_by(Site) %>%
+  mutate(Flow = as.double(Flow)) %>%
+  filter(Code > 0) %>%
+  group_by(Site, flowYear) %>%
+  mutate(PercentFlow = 1-(sum(is.na(Flow))/365),
+                     daysInRecord = n()) %>%
+  mutate(QC = ifelse(PercentFlow>0.95,"pass","fail")) %>%
+  mutate(QC = ifelse(daysInRecord > 360, QC, "fail")) %>%
+  filter(QC == "pass")
+
+head(dat)
+
+```
+
+## Evaluation
+
+### Baseflow to pools
+
+Baseflow to pools is assessed by looking at the number of days with flow above 0.05 ML/day. This level of flow is considered an ecologically relevant/functional flow for the small intermittent/seasonal rivers of the Northern Mt. Lofty Ranges. 
+
+
+```{r Baseflow_assessment}
+
+datInter <- dat %>% 
+  drop_na() %>%
+  dplyr::group_by(Site,flowYear) %>% 
+  mutate(Baseflow = ifelse(Flow>0.05, "Yes", "No")) %>%
+  mutate(DaysinYear = n()) %>%
+  dplyr::summarise(FlowDays = sum(Flow > 0.05)
+                   ,inter = sum(Flow > 0.05)/DaysinYear - 1 ) %>%
+  unique()
+
+```
+
+To visualise the number baseflow across the record, the number of days flowing (flow > 0.05ML/day) is produced.
+
+```{r Baseflow_plot}
+
+ggplot(datInter, aes(x=flowYear, y = inter, color = (Site), alpha(0.2))) +
+  geom_line() +
+  geom_smooth(method = "lm") +
+  scale_color_manual(values=c("orange", "purple"))+
+  labs(color = "Flow Data") +
+  ylab("Intermittency %")
+
+
+```
+
+Based on the assessment of intermittency, there has been no years with sufficient data that have shown any degree of intermittentcy. This does miss the cease to flow events that are present in the data in the years that were removed from the analysis due to having more than 5% missing data. In order to assess this, the data will be assessed looking at flow across the whole record rather than intermittency based on full flow years. 
+
+```{r Flow_assessment}
+
+dat_flow <- dir_info("C:/Ranalysis/MR_M8_Reporting/Inputs") %>%       #sets the working directory
+  dplyr::filter(grepl("streamflow",path)) %>%                 #finds files with flow in the file name
+  dplyr::select(path) %>%                               #selects files with flow in file name
+  dplyr::mutate(fileName = fs::path_file(path)
+                , Site = map_chr(fileName,~substr(.,1,regexpr("_",.)-1))
+                , data = map(path,read_csv)) %>% # reads in the data files (with "flow" in the name)
+  tidyr::unnest(data) %>% #splits the data up into individual bits
+  dplyr::mutate(Date = dmy(Date)
+                , Month = month(Date)
+                , year = year(Date)
+                , flowYear = if_else(Month<12,year,year+1)) %>% #creates additional parameters based on the data to aid script
+  dplyr::group_by(Site) %>%
+  mutate(Flow = as.double(Flow)) %>%
+  filter(Code > 0) 
+
+head(dat_flow)
+
+ggplot(dat_flow, aes(x=Date, y = Flow, color = (Site), alpha(0.2))) +
+  geom_line() +
+  geom_smooth(method = "lm") +
+  scale_color_manual(values=c("orange", "purple"))+
+  labs(color = "Flow Data") +
+  ylab("Daily flow (ML/d)")+
+  scale_y_continuous(trans = "log2", labels = comma) 
+
+ggsave("C:/Ranalysis/MR_M8_Reporting/plots/flow_2023.png", width = 7, height = 5)
+
+```
+
+Using the full data set the are three obvious cease to flow events, one in 2008 and two in 2018 as was reported in the previous Matter 8 report for the Murray Region. The additional 2.5 years of data available now show no additional cease to flow events.
+
+### High flow days
+
+Higher flows and overbank flows were assessed using both sets of flow data. As both gauges are capable of measuring higher flows, the number of high flow days per year across the two datasets were merged as the sensitivity of the gauging site is considered to be similar for flows of this magnitude. This produced a single time series from 1974 to 2019. A threshold of 20ML/day was used to classify a flow as ‘high flow’. This is a significant flow volume which would be sufficient to totally flush and scour the permanent pools in Burra Gorge. Based on the assessment in Deane et al. (2008) flows of this magnitude should be seen every 1–2 years.
+
+```{r High_flows_assessment}
+
+A4261148_Dat <- dat_flow %>%
+  filter(Site == "A4261148") 
+
+A4261148_min <- min(A4261148_Dat$Date)
+
+Highflow_Dat <- dat_flow %>%
+  filter(Site == "A4260536") %>%
+  filter(Date < A4261148_min) %>%
+  rbind((A4261148_Dat))
+
+Highflow_Dat %>%
+  mutate(Highflow = ifelse(Flow > 20, 1,0)) %>%
+  ungroup() %>%
+  group_by(flowYear) %>%
+  mutate(HighFlowDays = sum(Highflow)) %>%
+  ggplot(., aes(flowYear, HighFlowDays)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  ylab("Number of days with flow over 20 ML") +
+  theme(axis.title.x = element_blank())
+  
+
+```
+
+
+### Trend Assessment
+
+As part of the Matter 8 reporting, an assessment of trend of the various indicators is undertaken. 
+
+
+
+
+
+
+
+
+
+
+
