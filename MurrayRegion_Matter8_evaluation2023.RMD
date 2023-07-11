@@ -225,6 +225,8 @@ Highflow_Dat %>%
   geom_smooth(method = "lm") +
   ylab("Number of days with flow over 20 ML") +
   theme(axis.title.x = element_blank())
+
+ggsave("C:/Ranalysis/MR_M8_Reporting/plots/High flow days_2023.png", width = 7, height = 5)
   
 
 ```
@@ -232,7 +234,96 @@ Highflow_Dat %>%
 
 ### Trend Assessment
 
-As part of the Matter 8 reporting, an assessment of trend of the various indicators is undertaken. 
+As part of the Matter 8 reporting, an assessment of trend of the various indicators is undertaken. This trend assessment is undertaken using a Bayesian linear modelling approach that provides multiple estimates of the slope of the data and bases the assessment of trend on the proportion of positive/negative slopes. 
+
+The trend assessment of the flow data was undertaken on the data from A4261148 only as this covers off on the reporting period of the assessment. Trend assessment was undertaken on the full combined dataset used for the analysis of the number of days with flow over 20ML/day.
+
+```{r Trend_flow}
+
+FlowTrend <- dat_flow %>%
+  filter(Site == "A4261148")
+
+head(FlowTrend)
+
+modFlow <- stan_glm(Flow ~ Date 
+                    , data = FlowTrend
+                    , family = gaussian
+                    , cores = 12
+                    , iter = 4000)
+
+stan_trace(modFlow)
+
+ggsave("C:/Ranalysis/MR_M8_Reporting/plots/modFlow.png", stan_trace(modFlow))
+
+divideBy <- nrow(as_tibble(modFlow))
+modFlowRes <- as_tibble(modFlow) %>%
+  dplyr::select(Date) %>%
+  write_csv("C:/Ranalysis/MR_M8_Reporting/tbl/modFlowRes.csv")
+trendFlow <- modFlowRes %>%
+  dplyr::summarise(negSlope = sum(Date<0)/divideBy #count slopes less than 0
+                   , posSlope = sum(Date>0)/divideBy
+                   , ci90loSlope = quantile(Date, 0.05)
+                   , ci90upSlope = quantile(Date, 0.95)
+                   , meanSlope = mean(Date)) %>%
+  dplyr::mutate(Trend = map(negSlope,trend_set)
+                , intervalSlope = paste0(round(ci90loSlope,3)," to ",round(ci90upSlope,3))) %>%
+  tidyr::unnest(cols = c(Trend)) %>% #brings out as character but retains data
+  dplyr::mutate(Trend = fct_explicit_na(Trend, na_level = "Not applicable"),
+                Metric = "Flow") 
+
+head(trendFlow)
+
+write_csv(trendFlow,"C:/Ranalysis/MR_M8_Reporting/tbl/trendFlow.csv")
+
+HighflowTrend <- 
+  Highflow_Dat %>%
+  mutate(Highflow = ifelse(Flow > 20, 1,0)) %>%
+  ungroup() %>%
+  group_by(flowYear) %>%
+  mutate(HighFlowDays = sum(Highflow)) %>%
+  select(Site, flowYear, HighFlowDays)
+
+head(HighflowTrend)
+
+modBigFlow <- stan_glm(HighFlowDays ~ flowYear 
+                       , data = HighflowTrend
+                       , family = neg_binomial_2()
+                       , cores = 12
+                       , iter = 4000)
+
+stan_trace(modBigFlow)
+
+ggsave("C:/Ranalysis/MR_M8_Reporting/plots/modBigFlow.png", stan_trace(modBigFlow))
+
+divideBy <- nrow(as_tibble(modBigFlow))
+modBigFlowRes <- as_tibble(modBigFlow) %>%
+  dplyr::select(flowYear) %>%
+  write_csv("C:/Ranalysis/MR_M8_Reporting/tbl/modBigFlowRes.csv")
+trendBigFlow <- modBigFlowRes %>%
+  dplyr::summarise(negSlope = sum(flowYear<0)/divideBy #count slopes less than 0
+                   , posSlope = sum(flowYear>0)/divideBy
+                   , ci90loSlope = quantile(flowYear, 0.05)
+                   , ci90upSlope = quantile(flowYear, 0.95)
+                   , meanSlope = mean(flowYear)) %>%
+  dplyr::mutate(Trend = map(negSlope,trend_set)
+                , intervalSlope = paste0(round(ci90loSlope,3)," to ",round(ci90upSlope,3))) %>%
+  tidyr::unnest(cols = c(Trend)) %>% #brings out as character but retains data
+  dplyr::mutate(Trend = fct_explicit_na(Trend, na_level = "Not applicable"),
+                Metric = "Big Flows") 
+
+head(trendBigFlow)
+
+write_csv(trendBigFlow, "C:/Ranalysis/MR_M8_Reporting/tbl/trendBigFlows.csv")
+
+Trendoutput <- trendFlow %>%
+  rbind(trendBigFlow)
+
+head(Trendoutput)
+
+write_csv(Trendoutput, "C:/Ranalysis/MR_M8_Reporting/tbl/Trend output.csv")
+
+```
+
 
 
 
